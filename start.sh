@@ -42,6 +42,7 @@ install_custom_node() {
 }
 
 # Workflow-derived custom nodes
+install_custom_node "https://github.com/ltdrdata/ComfyUI-Manager.git" "ComfyUI-Manager"
 install_custom_node "https://github.com/rgthree/rgthree-comfy.git" "rgthree-comfy"
 install_custom_node "https://github.com/ClownsharkBatwing/RES4LYF.git" "RES4LYF"
 install_custom_node "https://github.com/yolain/ComfyUI-Easy-Use.git" "ComfyUI-Easy-Use"
@@ -53,8 +54,8 @@ install_custom_node "https://github.com/vrgamegirl19/comfyui-vrgamedevgirl.git" 
 # 1) remove CPU-only onnxruntime if some custom node pulled it in
 # 2) reinstall GPU build WITHOUT deps, so pip does not churn protobuf / numpy / etc.
 # -----------------------------------------------------------------------------
-pip uninstall -y onnxruntime || true
-pip install --no-deps --force-reinstall onnxruntime-gpu || true
+pip uninstall -y onnxruntime onnxruntime-gpu || true
+pip install --no-deps --force-reinstall onnxruntime-gpu==1.24.3 || true
 
 # Optional sanity check
 python - <<'PY' || true
@@ -162,6 +163,16 @@ download_civitai_file "models/loras" "FameGrid_Revolution.safetensors" "2733658"
 # Second CivitAI LoRA from your provided modelVersionId
 download_civitai_file "models/loras" "b3tternud3s_v3.safetensors" "2474435"
 
-jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root > /workspace/jupyter.log 2>&1 &
+jupyter lab \
+  --ip=0.0.0.0 \
+  --port=8888 \
+  --no-browser \
+  --allow-root \
+  --ServerApp.token='' \
+  --ServerApp.password='' \
+  --ServerApp.allow_origin='*' \
+  --ServerApp.disable_check_xsrf=True \
+  --ServerApp.root_dir=/workspace \
+  > /workspace/jupyter.log 2>&1 &
 
 python main.py --listen 0.0.0.0 --port 3000 --highvram --disable-auto-launch
