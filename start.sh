@@ -41,16 +41,30 @@ install_custom_node() {
   cd "$COMFY_RUNTIME"
 }
 
-# Custom nodes from workflow
+# Workflow-derived custom nodes
 install_custom_node "https://github.com/rgthree/rgthree-comfy.git" "rgthree-comfy"
 install_custom_node "https://github.com/ClownsharkBatwing/RES4LYF.git" "RES4LYF"
 install_custom_node "https://github.com/yolain/ComfyUI-Easy-Use.git" "ComfyUI-Easy-Use"
 install_custom_node "https://github.com/gseth/ControlAltAI-Nodes.git" "ControlAltAI-Nodes"
 install_custom_node "https://github.com/vrgamegirl19/comfyui-vrgamedevgirl.git" "comfyui-vrgamedevgirl"
 
-# Protect GPU ONNX after custom node installs
+# -----------------------------------------------------------------------------
+# ONNX fix:
+# 1) remove CPU-only onnxruntime if some custom node pulled it in
+# 2) reinstall GPU build WITHOUT deps, so pip does not churn protobuf / numpy / etc.
+# -----------------------------------------------------------------------------
 pip uninstall -y onnxruntime || true
-pip install --force-reinstall onnxruntime-gpu || true
+pip install --no-deps --force-reinstall onnxruntime-gpu || true
+
+# Optional sanity check
+python - <<'PY' || true
+try:
+    import onnxruntime as ort
+    print("[onnx] version:", ort.__version__)
+    print("[onnx] providers:", ort.get_available_providers())
+except Exception as e:
+    print("[onnx][warn] import/providers check failed:", e)
+PY
 
 # Model directories
 mkdir -p models/checkpoints
@@ -80,18 +94,40 @@ download_file() {
     --check-certificate=false \
     -x 16 -s 16 -k 1M \
     -d "$dst_dir" -o "$filename" "$url" \
-    || wget -O "$dst_dir/$filename" "$url"
+    || wget --content-disposition -O "$dst_dir/$filename" "$url"
 
   test -s "$dst_dir/$filename"
   chmod 666 "$dst_dir/$filename" || true
 }
 
-require_env() {
-  local var_name="$1"
-  if [ -z "${!var_name:-}" ]; then
-    echo "[error] Missing required environment variable: $var_name" >&2
-    exit 1
+download_civitai_file() {
+  local dst_dir="$1"
+  local filename="$2"
+  local model_version_id="$3"
+
+  if [ -s "$dst_dir/$filename" ]; then
+    echo "[skip] $filename already exists"
+    return 0
   fi
+
+  if [ -z "${CIVITAI_TOKEN:-}" ]; then
+    echo "[warn] CIVITAI_TOKEN not set, skipping $filename"
+    return 0
+  fi
+
+  local url="https://civitai.com/api/download/models/${model_version_id}?type=Model&format=SafeTensor&token=${CIVITAI_TOKEN}"
+
+  echo "[download] $filename from CivitAI"
+  aria2c \
+    --allow-overwrite=true \
+    --auto-file-renaming=false \
+    --check-certificate=false \
+    -x 16 -s 16 -k 1M \
+    -d "$dst_dir" -o "$filename" "$url" \
+    || wget --content-disposition -O "$dst_dir/$filename" "$url"
+
+  test -s "$dst_dir/$filename"
+  chmod 666 "$dst_dir/$filename" || true
 }
 
 # =========================
@@ -108,25 +144,23 @@ download_file "models/text_encoders" "qwen_3_4b.safetensors" "https://huggingfac
 # vae
 download_file "models/vae" "ae.safetensors" "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors?download=true"
 
-# upscale_models — ВСЕ ваши апскейлеры
+# upscale_models — all provided upscalers
 download_file "models/upscale_models" "4xPurePhoto-RealPLSKR.pth" "https://huggingface.co/mp3pintyo/upscale/resolve/8c80d55cdc2cc831912ece1848429cd3be52f9e1/4xPurePhoto-RealPLSKR.pth?download=true"
 download_file "models/upscale_models" "4x-UltraSharp.pth" "https://huggingface.co/mp3pintyo/upscale/resolve/8c80d55cdc2cc831912ece1848429cd3be52f9e1/4x-UltraSharp.pth?download=true"
 download_file "models/upscale_models" "4x_NMKD-Siax_200k.pth" "https://huggingface.co/uwg/upscaler/resolve/main/ESRGAN/4x_NMKD-Siax_200k.pth?download=true"
 
-# loras — публичные
+# public loras
 download_file "models/loras" "image_000003500.safetensors" "https://huggingface.co/Ali4652/z-image-yana/resolve/main/yana%20z%20image_000003500.safetensors?download=true"
 download_file "models/loras" "image_000003750.safetensors" "https://huggingface.co/Ali4652/z-image-yana/resolve/main/yana%20z%20image_000003750.safetensors?download=true"
 
 # =========================
-# Private / expiring LoRA URLs
-# Не хардкодим временные CivitAI-ссылки в образ
-# Передавайте их через env при запуске контейнера
+# CivitAI LoRAs via CIVITAI_TOKEN
 # =========================
-require_env "FAMEGRID_URL"
-require_env "B3TTERNUD3S_URL"
+# FameGrid 2nd Gen Z Image Qwen
+download_civitai_file "models/loras" "FameGrid_Revolution.safetensors" "2733658"
 
-download_file "models/loras" "FameGrid_Revolution.safetensors" "$FAMEGRID_URL"
-download_file "models/loras" "b3tternud3s_v3.safetensors" "$B3TTERNUD3S_URL"
+# Second CivitAI LoRA from your provided modelVersionId
+download_civitai_file "models/loras" "b3tternud3s_v3.safetensors" "2474435"
 
 jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root > /workspace/jupyter.log 2>&1 &
 
